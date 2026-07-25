@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ollama/ollama/api"
+	"github.com/ollama/ollama/manifest"
 )
 
 func TestConvertFromSafetensors(t *testing.T) {
@@ -17,7 +18,7 @@ func TestConvertFromSafetensors(t *testing.T) {
 
 	// Helper function to create a new layer and return its digest
 	makeTemp := func(content string) string {
-		l, err := NewLayer(strings.NewReader(content), "application/octet-stream")
+		l, err := manifest.NewLayer(strings.NewReader(content), "application/octet-stream")
 		if err != nil {
 			t.Fatalf("Failed to create layer: %v", err)
 		}
@@ -94,7 +95,7 @@ func TestConvertFromSafetensors(t *testing.T) {
 				"tokenizer.json": tokenizer,
 			}
 
-			_, err := convertFromSafetensors(files, nil, false, func(resp api.ProgressResponse) {})
+			_, err := convertFromSafetensors(files, nil, false, "", true, func(resp api.ProgressResponse) {})
 
 			if (tt.wantErr == nil && err != nil) ||
 				(tt.wantErr != nil && err == nil) ||
@@ -254,4 +255,34 @@ func TestRemoteURL_Idempotent(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSetTemplate(t *testing.T) {
+	t.Setenv("OLLAMA_MODELS", t.TempDir())
+
+	t.Run("valid template", func(t *testing.T) {
+		layers, err := setTemplate(nil, "{{ .Prompt }}")
+		if err != nil {
+			t.Fatalf("setTemplate returned error for valid template: %v", err)
+		}
+
+		if len(layers) != 1 {
+			t.Fatalf("expected 1 layer, got %d", len(layers))
+		}
+
+		if got, want := layers[0].MediaType, "application/vnd.ollama.image.template"; got != want {
+			t.Fatalf("unexpected media type: got %q, want %q", got, want)
+		}
+	})
+
+	t.Run("invalid template", func(t *testing.T) {
+		_, err := setTemplate(nil, "{{ if .Prompt }}")
+		if err == nil {
+			t.Fatal("expected error for invalid template, got nil")
+		}
+
+		if !errors.Is(err, errBadTemplate) {
+			t.Fatalf("expected errBadTemplate, got %v", err)
+		}
+	})
 }

@@ -6,13 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"log/slog"
+	"maps"
 	"math"
 	"slices"
 	"strings"
 
 	"github.com/ollama/ollama/format"
 	"github.com/ollama/ollama/fs/util/bufioutil"
+	"github.com/ollama/ollama/logutil"
 	"github.com/ollama/ollama/ml"
 )
 
@@ -158,6 +161,27 @@ func (kv KV) SSMGroupCount() uint64 {
 	return uint64(kv.Uint("ssm.group_count"))
 }
 
+func (kv KV) FFNLength() []uint64 {
+	ffnLengthDefault := uint32(0)
+	ffnLength := kv.UintOrArrayValueAsArray("feed_forward_length", ffnLengthDefault)
+	if len(ffnLength) == 1 {
+		ffnLengthDefault = ffnLength[0]
+	}
+	nLayers := int(kv.BlockCount())
+	if len(ffnLength) > nLayers {
+		slog.Warn("got more elements of feed_forward_length than layers", "len(ffnLength)", len(ffnLength), "layers", nLayers)
+	}
+	out := make([]uint64, nLayers)
+	for i := range nLayers {
+		if i >= len(ffnLength) {
+			out[i] = uint64(ffnLengthDefault)
+		} else {
+			out[i] = uint64(ffnLength[i])
+		}
+	}
+	return out
+}
+
 // general types
 
 func (kv KV) String(key string, defaultValue ...string) string {
@@ -239,20 +263,43 @@ func (kv KV) Bools(key string, defaultValue ...[]bool) []bool {
 	return val.values
 }
 
+func (kv KV) Len() int {
+	return len(kv)
+}
+
+func (kv KV) Keys() iter.Seq[string] {
+	return maps.Keys(kv)
+}
+
+func (kv KV) Value(key string) any {
+	return kv[key]
+}
+
 func (kv KV) OllamaEngineRequired() bool {
 	return slices.Contains([]string{
+		"bert",
+		"deepseek2",
+		"deepseekocr",
 		"gemma3",
 		"gemma3n",
+		"gemma4",
 		"gptoss", "gpt-oss",
+		"laguna",
 		"llama4",
 		"mistral3",
 		"mllama",
+		"nemotron_h", "nemotron_h_moe", "nemotron_h_omni",
+		"nomic-bert",
+		"olmo3",
 		"qwen25vl",
 		"qwen3", "qwen3moe",
+		"qwen35", "qwen35moe",
+		"qwen3next",
 		"qwen3vl", "qwen3vlmoe",
-		"deepseekocr",
-		"deepseek2",
-		"nomic-bert",
+		"glm4moelite",
+		"glmocr",
+		"lfm2",
+		"lfm2moe",
 	}, kv.Architecture())
 }
 
@@ -277,7 +324,7 @@ func keyValue[T valueTypes | arrayValueTypes](kv KV, key string, defaultValue ..
 		return val, true
 	}
 
-	slog.Debug("key with type not found", "key", key, "default", defaultValue[0])
+	logutil.Trace("key with type not found", "key", key, "default", defaultValue[0])
 	return defaultValue[0], false
 }
 
@@ -377,8 +424,12 @@ func (t TensorType) BlockSize() uint64 {
 		TensorTypeQ8_0,
 		TensorTypeQ8_1,
 		tensorTypeIQ4_NL,
-		4, TensorTypeMXFP4:
+		TensorTypeMXFP4:
 		return 32
+	case TensorTypeNVFP4:
+		return 64
+	case TensorTypeQ1_0:
+		return 128
 	default:
 		return 256
 	}
@@ -450,8 +501,12 @@ func (t TensorType) TypeSize() uint64 {
 		return blockSize/8 + blockSize/16 + blockSize/32
 	case TensorTypeBF16:
 		return 2
-	case 4, TensorTypeMXFP4:
+	case TensorTypeMXFP4:
 		return 1 + blockSize/2
+	case TensorTypeNVFP4:
+		return 4 + blockSize/2
+	case TensorTypeQ1_0:
+		return 2 + blockSize/8
 	default:
 		return 0
 	}
@@ -465,8 +520,47 @@ func (t Tensor) Elements() uint64 {
 	return count
 }
 
+func (t Tensor) elements() (uint64, bool) {
+	var count uint64 = 1
+	for _, n := range t.Shape {
+		if n != 0 && count > ^uint64(0)/n {
+			return 0, false
+		}
+		count *= n
+	}
+	return count, true
+}
+
 func (t Tensor) Size() uint64 {
 	return t.Elements() * t.typeSize() / t.blockSize()
+}
+
+func (t Tensor) size() (uint64, bool) {
+	elements, ok := t.elements()
+	if !ok {
+		return 0, false
+	}
+
+	typeSize := t.typeSize()
+	blockSize := t.blockSize()
+	if typeSize == 0 || blockSize == 0 {
+		return 0, false
+	}
+
+	rowSize := uint64(1)
+	if len(t.Shape) > 0 {
+		rowSize = t.Shape[0]
+	}
+	if rowSize%blockSize != 0 {
+		return 0, false
+	}
+
+	blocks := elements / blockSize
+	if blocks > ^uint64(0)/typeSize {
+		return 0, false
+	}
+
+	return blocks * typeSize, true
 }
 
 func (t Tensor) Type() string {
@@ -825,7 +919,12 @@ func (f GGML) SupportsFlashAttention() bool {
 		return false
 	}
 
-	if arch := f.KV().Architecture(); slices.Contains([]string{"gemma2"}, arch) {
+	arch := f.KV().Architecture()
+	if slices.Contains([]string{"qwen35", "qwen35moe", "qwen3next"}, arch) {
+		return true
+	}
+
+	if slices.Contains([]string{"gemma2", "grok"}, arch) {
 		return false
 	}
 
@@ -838,10 +937,20 @@ func (f GGML) SupportsFlashAttention() bool {
 // FlashAttention checks if the model should enable flash attention
 func (f GGML) FlashAttention() bool {
 	return slices.Contains([]string{
+		"bert",
 		"gemma3",
+		"gemma4",
+		"glm4moelite",
+		"glmocr",
 		"gptoss", "gpt-oss",
+		"lfm2",
+		"lfm2moe",
 		"mistral3",
+		"nemotron_h", "nemotron_h_moe", "nemotron_h_omni",
+		"olmo3",
 		"qwen3", "qwen3moe",
+		"qwen35", "qwen35moe",
+		"qwen3next",
 		"qwen3vl", "qwen3vlmoe",
 	}, f.KV().String("general.architecture"))
 }

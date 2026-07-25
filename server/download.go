@@ -24,6 +24,8 @@ import (
 
 	"github.com/ollama/ollama/api"
 	"github.com/ollama/ollama/format"
+	"github.com/ollama/ollama/manifest"
+	"github.com/ollama/ollama/types/model"
 )
 
 const maxRetries = 6
@@ -99,6 +101,8 @@ const (
 	minDownloadPartSize int64 = 100 * format.MegaByte
 	maxDownloadPartSize int64 = 1000 * format.MegaByte
 )
+
+var downloadStallTimeout = 30 * time.Second
 
 func (p *blobDownloadPart) Name() string {
 	return strings.Join([]string{
@@ -328,7 +332,11 @@ func (b *blobDownload) run(ctx context.Context, requestURL *url.URL, opts *regis
 
 func (b *blobDownload) downloadChunk(ctx context.Context, requestURL *url.URL, w io.Writer, part *blobDownloadPart) error {
 	g, ctx := errgroup.WithContext(ctx)
+	attemptStarted := time.Now()
+	transferDone := make(chan struct{})
 	g.Go(func() error {
+		defer close(transferDone)
+
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
 		if err != nil {
 			return err
@@ -357,19 +365,21 @@ func (b *blobDownload) downloadChunk(ctx context.Context, requestURL *url.URL, w
 	})
 
 	g.Go(func() error {
-		ticker := time.NewTicker(time.Second)
+		ticker := time.NewTicker(min(time.Second, downloadStallTimeout/2))
+		defer ticker.Stop()
 		for {
 			select {
+			case <-transferDone:
+				return nil
 			case <-ticker.C:
-				if part.Completed.Load() >= part.Size {
-					return nil
-				}
-
 				part.lastUpdatedMu.Lock()
 				lastUpdated := part.lastUpdated
 				part.lastUpdatedMu.Unlock()
+				if lastUpdated.Before(attemptStarted) {
+					lastUpdated = attemptStarted
+				}
 
-				if !lastUpdated.IsZero() && time.Since(lastUpdated) > 30*time.Second {
+				if time.Since(lastUpdated) > downloadStallTimeout {
 					const msg = "%s part %d stalled; retrying. If this persists, press ctrl-c to exit, then 'ollama pull' to find a faster connection."
 					slog.Info(fmt.Sprintf(msg, b.Digest[7:19], part.N))
 					// reset last updated
@@ -456,7 +466,7 @@ func (b *blobDownload) Wait(ctx context.Context, fn func(api.ProgressResponse)) 
 }
 
 type downloadOpts struct {
-	mp      ModelPath
+	n       model.Name
 	digest  string
 	regOpts *registryOptions
 	fn      func(api.ProgressResponse)
@@ -465,10 +475,10 @@ type downloadOpts struct {
 // downloadBlob downloads a blob from the registry and stores it in the blobs directory
 func downloadBlob(ctx context.Context, opts downloadOpts) (cacheHit bool, _ error) {
 	if opts.digest == "" {
-		return false, fmt.Errorf(("%s: %s"), opts.mp.GetNamespaceRepository(), "digest is empty")
+		return false, fmt.Errorf(("%s: %s"), opts.n.DisplayNamespaceModel(), "digest is empty")
 	}
 
-	fp, err := GetBlobsPath(opts.digest)
+	fp, err := manifest.BlobsPath(opts.digest)
 	if err != nil {
 		return false, err
 	}
@@ -492,8 +502,8 @@ func downloadBlob(ctx context.Context, opts downloadOpts) (cacheHit bool, _ erro
 	data, ok := blobDownloadManager.LoadOrStore(opts.digest, &blobDownload{Name: fp, Digest: opts.digest})
 	download := data.(*blobDownload)
 	if !ok {
-		requestURL := opts.mp.BaseURL()
-		requestURL = requestURL.JoinPath("v2", opts.mp.GetNamespaceRepository(), "blobs", opts.digest)
+		requestURL := opts.n.BaseURL()
+		requestURL = requestURL.JoinPath("v2", opts.n.DisplayNamespaceModel(), "blobs", opts.digest)
 		if err := download.Prepare(ctx, requestURL, opts.regOpts); err != nil {
 			blobDownloadManager.Delete(opts.digest)
 			return false, err

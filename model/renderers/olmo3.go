@@ -10,12 +10,19 @@ import (
 )
 
 const (
-	olmo3DefaultSystemMessage = "You are a helpful function-calling AI assistant. "
-	olmo3NoFunctionsMessage   = "You do not currently have access to any functions. "
-	olmo3WithFunctionsMessage = "You are provided with function signatures within <functions></functions> XML tags. You may call one or more functions to assist with the user query. Output any function calls within <function_calls></function_calls> XML tags. Do not make assumptions about what values to plug into functions."
+	olmo3DefaultSystemMessage  = "You are a helpful function-calling AI assistant. "
+	olmo31DefaultSystemMessage = "You are Olmo, a helpful AI assistant built by Ai2. Your date cutoff is December 2024, and your model weights are available at https://huggingface.co/allenai. "
+	olmo3NoFunctionsMessage    = "You do not currently have access to any functions. "
+	olmo3WithFunctionsMessage  = "You are provided with function signatures within <functions></functions> XML tags. You may call one or more functions to assist with the user query. Output any function calls within <function_calls></function_calls> XML tags. Do not make assumptions about what values to plug into functions."
 )
 
-type Olmo3Renderer struct{}
+type Olmo3Renderer struct {
+	UseExtendedSystemMessage bool
+}
+
+func (r *Olmo3Renderer) LeadingBOS() string {
+	return ""
+}
 
 func (r *Olmo3Renderer) Render(messages []api.Message, tools []api.Tool, _ *api.ThinkValue) (string, error) {
 	var sb strings.Builder
@@ -51,7 +58,11 @@ func (r *Olmo3Renderer) Render(messages []api.Message, tools []api.Tool, _ *api.
 	} else {
 		// Default system message - single newline after "system"
 		sb.WriteString("<|im_start|>system\n")
-		sb.WriteString(olmo3DefaultSystemMessage)
+		if r.UseExtendedSystemMessage {
+			sb.WriteString(olmo31DefaultSystemMessage)
+		} else {
+			sb.WriteString(olmo3DefaultSystemMessage)
+		}
 
 		if len(tools) > 0 {
 			functionsJSON, err := marshalWithSpaces(tools)
@@ -93,8 +104,8 @@ func (r *Olmo3Renderer) Render(messages []api.Message, tools []api.Tool, _ *api.
 					sb.WriteString("(")
 
 					// Get sorted keys for deterministic output
-					keys := make([]string, 0, len(tc.Function.Arguments))
-					for k := range tc.Function.Arguments {
+					keys := make([]string, 0, tc.Function.Arguments.Len())
+					for k := range tc.Function.Arguments.All() {
 						keys = append(keys, k)
 					}
 					sort.Strings(keys)
@@ -103,7 +114,8 @@ func (r *Olmo3Renderer) Render(messages []api.Message, tools []api.Tool, _ *api.
 						if k > 0 {
 							sb.WriteString(", ")
 						}
-						value, err := json.Marshal(tc.Function.Arguments[key])
+						val, _ := tc.Function.Arguments.Get(key)
+						value, err := json.Marshal(val)
 						if err != nil {
 							return "", err
 						}
@@ -140,7 +152,7 @@ func (r *Olmo3Renderer) Render(messages []api.Message, tools []api.Tool, _ *api.
 	}
 
 	if needsGenerationPrompt {
-		sb.WriteString("<|im_start|>assistant\n\n")
+		sb.WriteString("<|im_start|>assistant\n")
 	}
 
 	return sb.String(), nil

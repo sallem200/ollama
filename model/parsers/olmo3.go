@@ -26,8 +26,9 @@ const (
 )
 
 type Olmo3Parser struct {
-	state  olmo3ParserState
-	buffer strings.Builder
+	state     olmo3ParserState
+	buffer    strings.Builder
+	callIndex int
 }
 
 func (p *Olmo3Parser) HasToolSupport() bool {
@@ -38,8 +39,16 @@ func (p *Olmo3Parser) HasThinkingSupport() bool {
 	return false
 }
 
+func (p *Olmo3Parser) PreservedTokens() []string {
+	return []string{
+		olmo3FuncCallsOpenTag,
+		olmo3FuncCallsCloseTag,
+	}
+}
+
 func (p *Olmo3Parser) Init(tools []api.Tool, lastMessage *api.Message, thinkValue *api.ThinkValue) []api.Tool {
 	p.state = olmo3StateContent
+	p.callIndex = 0
 	return tools
 }
 
@@ -82,6 +91,11 @@ func (p *Olmo3Parser) Add(s string, done bool) (content string, thinking string,
 		case olmo3ParserEventToolCalls:
 			allCalls = append(allCalls, event.calls...)
 		}
+	}
+
+	for i := range allCalls {
+		allCalls[i].Function.Index = p.callIndex
+		p.callIndex++
 	}
 
 	return contentSb.String(), "", allCalls, nil
@@ -242,8 +256,8 @@ func parseOlmo3SingleFunctionCall(s string) (api.ToolCall, error) {
 
 // parseOlmo3Arguments parses comma-separated key=value pairs
 // Handles nested parentheses, brackets, braces, and quoted strings
-func parseOlmo3Arguments(s string) (map[string]any, error) {
-	args := make(map[string]any)
+func parseOlmo3Arguments(s string) (api.ToolCallFunctionArguments, error) {
+	args := api.NewToolCallFunctionArguments()
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return args, nil
@@ -261,7 +275,7 @@ func parseOlmo3Arguments(s string) (map[string]any, error) {
 		// Find the first = sign
 		eqIdx := strings.Index(part, "=")
 		if eqIdx == -1 {
-			return nil, fmt.Errorf("invalid argument format: %s", part)
+			return api.ToolCallFunctionArguments{}, fmt.Errorf("invalid argument format: %s", part)
 		}
 
 		key := strings.TrimSpace(part[:eqIdx])
@@ -269,10 +283,10 @@ func parseOlmo3Arguments(s string) (map[string]any, error) {
 
 		value, err := parseOlmo3Value(valueStr)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse value for %s: %w", key, err)
+			return api.ToolCallFunctionArguments{}, fmt.Errorf("failed to parse value for %s: %w", key, err)
 		}
 
-		args[key] = value
+		args.Set(key, value)
 	}
 
 	return args, nil

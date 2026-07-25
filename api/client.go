@@ -165,7 +165,7 @@ func (c *Client) do(ctx context.Context, method, path string, reqData, respData 
 	return nil
 }
 
-const maxBufferSize = 512 * format.KiloByte
+const maxBufferSize = 8 * format.MegaByte
 
 func (c *Client) stream(ctx context.Context, method, path string, data any, fn func([]byte) error) error {
 	var buf io.Reader
@@ -257,6 +257,10 @@ func (c *Client) stream(ctx context.Context, method, path string, data any, fn f
 		if err := fn(bts); err != nil {
 			return err
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return err
 	}
 
 	return nil
@@ -368,6 +372,16 @@ func (c *Client) List(ctx context.Context) (*ListResponse, error) {
 	return &lr, nil
 }
 
+// ModelRecommendationsExperimental lists model recommendations from the local
+// server's experimental recommendations endpoint.
+func (c *Client) ModelRecommendationsExperimental(ctx context.Context) (*ModelRecommendationsResponse, error) {
+	var resp ModelRecommendationsResponse
+	if err := c.do(ctx, http.MethodGet, "/api/experimental/model-recommendations", nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // ListRunning lists running models.
 func (c *Client) ListRunning(ctx context.Context) (*ProcessResponse, error) {
 	var lr ProcessResponse
@@ -447,6 +461,36 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 	}
 
 	return version.Version, nil
+}
+
+// CloudStatusExperimental returns whether cloud features are disabled on the server.
+func (c *Client) CloudStatusExperimental(ctx context.Context) (*StatusResponse, error) {
+	var status StatusResponse
+	if err := c.do(ctx, http.MethodGet, "/api/status", nil, &status); err != nil {
+		return nil, err
+	}
+
+	return &status, nil
+}
+
+// WebSearchExperimental searches the web through the local server's
+// experimental web search endpoint.
+func (c *Client) WebSearchExperimental(ctx context.Context, req *WebSearchRequest) (*WebSearchResponse, error) {
+	var resp WebSearchResponse
+	if err := c.do(ctx, http.MethodPost, "/api/experimental/web_search", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// WebFetchExperimental fetches web page content through the local server's
+// experimental web fetch endpoint.
+func (c *Client) WebFetchExperimental(ctx context.Context, req *WebFetchRequest) (*WebFetchResponse, error) {
+	var resp WebFetchResponse
+	if err := c.do(ctx, http.MethodPost, "/api/experimental/web_fetch", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // Signout will signout a client for a local ollama server.

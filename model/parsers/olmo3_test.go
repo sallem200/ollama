@@ -28,7 +28,7 @@ func TestOlmo3Parser(t *testing.T) {
 				{
 					Function: api.ToolCallFunction{
 						Name:      "get_weather",
-						Arguments: map[string]any{"location": "San Francisco"},
+						Arguments: testArgs(map[string]any{"location": "San Francisco"}),
 					},
 				},
 			},
@@ -41,7 +41,7 @@ func TestOlmo3Parser(t *testing.T) {
 				{
 					Function: api.ToolCallFunction{
 						Name:      "get_weather",
-						Arguments: map[string]any{"location": "NYC"},
+						Arguments: testArgs(map[string]any{"location": "NYC"}),
 					},
 				},
 			},
@@ -53,11 +53,11 @@ func TestOlmo3Parser(t *testing.T) {
 				{
 					Function: api.ToolCallFunction{
 						Name: "book_flight",
-						Arguments: map[string]any{
+						Arguments: testArgs(map[string]any{
 							"from": "SFO",
 							"to":   "NYC",
 							"date": "2024-01-15",
-						},
+						}),
 					},
 				},
 			},
@@ -69,14 +69,16 @@ get_weather(location="New York")</function_calls>`,
 			expectedCalls: []api.ToolCall{
 				{
 					Function: api.ToolCallFunction{
+						Index:     0,
 						Name:      "get_weather",
-						Arguments: map[string]any{"location": "San Francisco"},
+						Arguments: testArgs(map[string]any{"location": "San Francisco"}),
 					},
 				},
 				{
 					Function: api.ToolCallFunction{
+						Index:     1,
 						Name:      "get_weather",
-						Arguments: map[string]any{"location": "New York"},
+						Arguments: testArgs(map[string]any{"location": "New York"}),
 					},
 				},
 			},
@@ -88,7 +90,7 @@ get_weather(location="New York")</function_calls>`,
 				{
 					Function: api.ToolCallFunction{
 						Name:      "set_temperature",
-						Arguments: map[string]any{"value": int64(72)},
+						Arguments: testArgs(map[string]any{"value": int64(72)}),
 					},
 				},
 			},
@@ -100,7 +102,7 @@ get_weather(location="New York")</function_calls>`,
 				{
 					Function: api.ToolCallFunction{
 						Name:      "set_price",
-						Arguments: map[string]any{"amount": 19.99},
+						Arguments: testArgs(map[string]any{"amount": 19.99}),
 					},
 				},
 			},
@@ -112,7 +114,7 @@ get_weather(location="New York")</function_calls>`,
 				{
 					Function: api.ToolCallFunction{
 						Name:      "toggle_setting",
-						Arguments: map[string]any{"enabled": true},
+						Arguments: testArgs(map[string]any{"enabled": true}),
 					},
 				},
 			},
@@ -124,7 +126,7 @@ get_weather(location="New York")</function_calls>`,
 				{
 					Function: api.ToolCallFunction{
 						Name:      "clear_value",
-						Arguments: map[string]any{"field": nil},
+						Arguments: testArgs(map[string]any{"field": nil}),
 					},
 				},
 			},
@@ -136,7 +138,7 @@ get_weather(location="New York")</function_calls>`,
 				{
 					Function: api.ToolCallFunction{
 						Name:      "process_items",
-						Arguments: map[string]any{"items": []any{"apple", "banana", "cherry"}},
+						Arguments: testArgs(map[string]any{"items": []any{"apple", "banana", "cherry"}}),
 					},
 				},
 			},
@@ -148,12 +150,12 @@ get_weather(location="New York")</function_calls>`,
 				{
 					Function: api.ToolCallFunction{
 						Name: "update_config",
-						Arguments: map[string]any{
+						Arguments: testArgs(map[string]any{
 							"settings": map[string]any{
 								"theme":    "dark",
 								"fontSize": int64(14),
 							},
-						},
+						}),
 					},
 				},
 			},
@@ -165,7 +167,7 @@ get_weather(location="New York")</function_calls>`,
 				{
 					Function: api.ToolCallFunction{
 						Name: "create_request",
-						Arguments: map[string]any{
+						Arguments: testArgs(map[string]any{
 							"data": map[string]any{
 								"user": map[string]any{
 									"name": "John",
@@ -173,7 +175,7 @@ get_weather(location="New York")</function_calls>`,
 								},
 								"active": true,
 							},
-						},
+						}),
 					},
 				},
 			},
@@ -185,7 +187,7 @@ get_weather(location="New York")</function_calls>`,
 				{
 					Function: api.ToolCallFunction{
 						Name:      "get_current_time",
-						Arguments: map[string]any{},
+						Arguments: testArgs(map[string]any{}),
 					},
 				},
 			},
@@ -197,7 +199,7 @@ get_weather(location="New York")</function_calls>`,
 				{
 					Function: api.ToolCallFunction{
 						Name:      "search",
-						Arguments: map[string]any{"query": "hello world"},
+						Arguments: testArgs(map[string]any{"query": "hello world"}),
 					},
 				},
 			},
@@ -209,7 +211,7 @@ get_weather(location="New York")</function_calls>`,
 				{
 					Function: api.ToolCallFunction{
 						Name:      "search",
-						Arguments: map[string]any{"query": `say "hello"`},
+						Arguments: testArgs(map[string]any{"query": `say "hello"`}),
 					},
 				},
 			},
@@ -221,11 +223,11 @@ get_weather(location="New York")</function_calls>`,
 				{
 					Function: api.ToolCallFunction{
 						Name: "create_user",
-						Arguments: map[string]any{
+						Arguments: testArgs(map[string]any{
 							"name":   "John",
 							"age":    int64(30),
 							"active": true,
-						},
+						}),
 					},
 				},
 			},
@@ -257,7 +259,7 @@ get_weather(location="New York")</function_calls>`,
 			if diff := cmp.Diff(thinking, tt.expectedThinking); diff != "" {
 				t.Errorf("thinking mismatch (-got +want):\n%s", diff)
 			}
-			if diff := cmp.Diff(calls, tt.expectedCalls); diff != "" {
+			if diff := cmp.Diff(calls, tt.expectedCalls, argsComparer); diff != "" {
 				t.Errorf("calls mismatch (-got +want):\n%s", diff)
 			}
 		})
@@ -283,7 +285,7 @@ func TestOlmo3Parser_Streaming(t *testing.T) {
 				{
 					Function: api.ToolCallFunction{
 						Name:      "get_weather",
-						Arguments: map[string]any{"location": "SF"},
+						Arguments: testArgs(map[string]any{"location": "SF"}),
 					},
 				},
 			},
@@ -296,7 +298,7 @@ func TestOlmo3Parser_Streaming(t *testing.T) {
 				{
 					Function: api.ToolCallFunction{
 						Name:      "get_weather",
-						Arguments: map[string]any{"location": "NYC"},
+						Arguments: testArgs(map[string]any{"location": "NYC"}),
 					},
 				},
 			},
@@ -308,7 +310,7 @@ func TestOlmo3Parser_Streaming(t *testing.T) {
 				{
 					Function: api.ToolCallFunction{
 						Name:      "test",
-						Arguments: map[string]any{},
+						Arguments: testArgs(map[string]any{}),
 					},
 				},
 			},
@@ -343,7 +345,7 @@ func TestOlmo3Parser_Streaming(t *testing.T) {
 			if diff := cmp.Diff(allContent, tt.expectedContent); diff != "" {
 				t.Errorf("content mismatch (-got +want):\n%s", diff)
 			}
-			if diff := cmp.Diff(allCalls, tt.expectedCalls); diff != "" {
+			if diff := cmp.Diff(allCalls, tt.expectedCalls, argsComparer); diff != "" {
 				t.Errorf("calls mismatch (-got +want):\n%s", diff)
 			}
 		})
@@ -378,7 +380,7 @@ func TestParseOlmo3FunctionCalls(t *testing.T) {
 				{
 					Function: api.ToolCallFunction{
 						Name:      "get_weather",
-						Arguments: map[string]any{"location": "SF"},
+						Arguments: testArgs(map[string]any{"location": "SF"}),
 					},
 				},
 			},
@@ -390,11 +392,11 @@ func TestParseOlmo3FunctionCalls(t *testing.T) {
 				{
 					Function: api.ToolCallFunction{
 						Name: "send_email",
-						Arguments: map[string]any{
+						Arguments: testArgs(map[string]any{
 							"to":      "user@example.com",
 							"subject": "Hello",
 							"body":    "Test message",
-						},
+						}),
 					},
 				},
 			},
@@ -407,13 +409,13 @@ get_time(timezone="PST")`,
 				{
 					Function: api.ToolCallFunction{
 						Name:      "get_weather",
-						Arguments: map[string]any{"location": "SF"},
+						Arguments: testArgs(map[string]any{"location": "SF"}),
 					},
 				},
 				{
 					Function: api.ToolCallFunction{
 						Name:      "get_time",
-						Arguments: map[string]any{"timezone": "PST"},
+						Arguments: testArgs(map[string]any{"timezone": "PST"}),
 					},
 				},
 			},
@@ -437,7 +439,7 @@ get_time(timezone="PST")`,
 				t.Errorf("parseOlmo3FunctionCalls() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if diff := cmp.Diff(calls, tt.expected); diff != "" {
+			if diff := cmp.Diff(calls, tt.expected, argsComparer); diff != "" {
 				t.Errorf("calls mismatch (-got +want):\n%s", diff)
 			}
 		})
